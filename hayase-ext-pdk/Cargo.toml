@@ -1,0 +1,12 @@
+[package]
+name = "hayase-ext-pdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PDK for Hayase-Rust torrent extensions (Extism WASM plugins)"
+
+[dependencies]
+extism-pdk.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true

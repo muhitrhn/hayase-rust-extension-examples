@@ -1,0 +1,122 @@
+[
+  {
+    "manifestVersion": 2,
+    "name": "Nyaa",
+    "id": "anitorrent.nyaa",
+    "version": "1.0.33",
+    "type": "torrent",
+    "accuracy": "medium",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "description": "Searches nyaa.si directly for anime torrents. Full firehose, string-search matched, strict episode filter.",
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "./anitorrent.json",
+    "code": "./nyaa.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "AnimeTosho",
+    "id": "anitorrent.animetosho",
+    "version": "1.0.26",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9mZWVkLmFuaW1ldG9zaG8ub3Jn",
+    "description": "Aggregator with anidb episode-ID mapping. High accuracy via exact ID lookup, falls back to text search.",
+    "icon": "https://animetosho.org/favicon.ico",
+    "update": "./anitorrent.json",
+    "code": "./animetosho.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Seadex",
+    "id": "anitorrent.seadex",
+    "version": "1.0.2",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": true,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9yZWxlYXNlcy5tb2U=",
+    "description": "Manually curated best releases per anime, looked up by AniList ID. Returns batches/movies tagged best or alt.",
+    "icon": "https://releases.moe/favicon.png",
+    "update": "./anitorrent.json",
+    "code": "./seadex.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "SubsPlease",
+    "id": "anitorrent.subsplease",
+    "version": "1.0.24",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": true,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9zdWJzcGxlYXNlLm9yZw==",
+    "description": "Direct API for currently-airing weekly fansubs from SubsPlease. Catches new episodes immediately on release, but only covers shows in their fansub catalog.",
+    "icon": "https://subsplease.org/favicon.ico",
+    "update": "./anitorrent.json",
+    "code": "./subsplease.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Yameii (Dubs)",
+    "id": "anitorrent.yameii",
+    "version": "1.0.30",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "description": "English dub uploads from Yameii on nyaa.si. Single-uploader source, highly consistent quality. IRC: #Yameii@irc.rizon.net.",
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "./anitorrent.json",
+    "code": "./yameii.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "ToonsHub",
+    "id": "anitorrent.toonshub",
+    "version": "1.0.27",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "description": "ToonsHub releases on nyaa.si. Title-prefix filter for the [ToonsHub] group. Wide coverage of currently-airing shows, both subbed and dual-audio variants. Group's Telegram: t.me/thtorrents.",
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "./anitorrent.json",
+    "code": "./toonshub.wasm"
+  }
+]

@@ -1,0 +1,98 @@
+[
+  {
+    "manifestVersion": 2,
+    "name": "Seadex",
+    "id": "hayase.extension.seadex",
+    "version": "0.0.2",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": [
+      "US"
+    ],
+    "icon": "https://releases.moe/favicon.png",
+    "update": "./letmegetabyte.json",
+    "code": "./seadex.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "AnimeTosho",
+    "id": "hayase.extension.animetosho",
+    "version": "0.0.3",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": [
+      "US"
+    ],
+    "icon": "https://animetosho.org/inc/favicon.ico",
+    "update": "./letmegetabyte.json",
+    "code": "./animetosho.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Nyaa",
+    "id": "hayase.extension.nyaa",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": [
+      "all"
+    ],
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "./letmegetabyte.json",
+    "code": "./nyaa.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "id": "hayase.extension.piratebay",
+    "name": "PirateBay",
+    "version": "0.0.11",
+    "type": "torrent",
+    "accuracy": "low",
+    "media": "both",
+    "languages": [
+      "US"
+    ],
+    "description": "Fetches torrents from The Pirate Bay via Torrents-API",
+    "icon": "https://upload.wikimedia.org/wikipedia/en/3/36/The_Pirate_Bay_logo.svg",
+    "update": "./letmegetabyte.json",
+    "code": "./piratebay.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "SubsPlease",
+    "id": "hayase.extension.subsplease",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": [
+      "US"
+    ],
+    "icon": "https://subsplease.org/favicon.ico",
+    "update": "./letmegetabyte.json",
+    "code": "./subsplease.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "TokyoTosho",
+    "id": "hayase.extension.tokyotosho",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "medium",
+    "ratio": 0,
+    "media": "sub",
+    "languages": [
+      "US"
+    ],
+    "icon": "https://www.tokyotosho.info/favicon.ico",
+    "update": "./letmegetabyte.json",
+    "code": "./tokyotosho.wasm"
+  }
+]

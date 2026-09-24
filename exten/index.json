@@ -1,0 +1,88 @@
+[
+  {
+    "manifestVersion": 2,
+    "name": "NekoBT",
+    "id": "nekobt",
+    "version": "0.1.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "updatePeers": false,
+    "languages": ["US"],
+    "url": "aHR0cHM6Ly9uZWtvYnQudG8vYXBpL3YxLw==",
+    "icon": "https://nekobt.to/cdn/pfp/null/64",
+    "update": "./index.json",
+    "code": "./nekobt.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Seadex",
+    "id": "seadex",
+    "version": "0.0.7",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": ["US"],
+    "icon": "https://releases.moe/favicon.png",
+    "update": "./index.json",
+    "code": "./seadex.wasm"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "AnimeTosho (Old)",
+    "id": "animetosho",
+    "version": "0.1.4",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": ["US"],
+    "icon": "https://animetosho.org/inc/favicon.ico",
+    "update": "./index.json",
+    "code": "./animetosho.wasm",
+    "options": {
+      "useTorrent": {
+        "type": "boolean",
+        "description": "Use .torrent files instead of magnet links, this can cause issues with some internet providers if they block some domains",
+        "default": false
+      }
+    }
+  },
+  {
+    "manifestVersion": 2,
+    "name": "AnimeTosho (New)",
+    "id": "animetosho-new",
+    "version": "0.0.1",
+    "type": "torrent",
+    "accuracy": "medium",
+    "ratio": 0,
+    "media": "sub",
+    "languages": ["US"],
+    "icon": "https://animetosho.xyz/static/favicon.ico",
+    "update": "./index.json",
+    "code": "./animetosho_new.wasm",
+    "options": {
+      "useTorrent": {
+        "type": "boolean",
+        "description": "Use .torrent files instead of magnet links, this can cause issues with some internet providers if they block some domains",
+        "default": false
+      }
+    }
+  },
+  {
+    "manifestVersion": 2,
+    "name": "AniSearch",
+    "id": "anisearch",
+    "version": "0.0.5",
+    "type": "torrent",
+    "accuracy": "high",
+    "ratio": 0,
+    "media": "sub",
+    "languages": ["US"],
+    "icon": "https://api.anisearch.org/swagger/favicon-32x32.png",
+    "update": "./index.json",
+    "code": "./anisearch.wasm"
+  }
+]

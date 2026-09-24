@@ -1,0 +1,12 @@
+[package]
+name = "sukebei"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hayase-ext-pdk.workspace = true
+extism-pdk.workspace = true
