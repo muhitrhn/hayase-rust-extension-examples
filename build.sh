@@ -41,7 +41,7 @@ pack letmegetabyte seadex animetosho nyaa piratebay subsplease tokyotosho
 pack anitorrent nyaa animetosho seadex subsplease yameii toonshub
 
 mkdir -p catalogs
-for crate in nyaa piratebay seadex animetosho animetosho_new subsplease tokyotosho yameii toonshub nekobt anisearch; do
+for crate in nyaa sukebei piratebay seadex animetosho animetosho_new subsplease tokyotosho yameii toonshub nekobt anisearch; do
   src="$(wasm_src "$crate")"
   cp "$src" "catalogs/${crate}.wasm"
 done

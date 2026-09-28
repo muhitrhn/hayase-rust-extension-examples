@@ -130,6 +130,25 @@ pub fn encode_query(s: &str) -> String {
     out
 }
 
+/// LetMeGetAByte / ReWelp: `title.replace(/[^\w\s-]/g, ' ').trim()` plus padded episode.
+pub fn titles0_query(title: &str, episode: i32) -> String {
+    let mut query: String = title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c.is_whitespace() || c == '-' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    query = query.trim().to_string();
+    if episode != 0 {
+        query.push_str(&format!(" {episode:02}"));
+    }
+    query
+}
+
 pub fn magnet_hash(magnet_or_link: &str) -> Option<String> {
     let lower = magnet_or_link.to_ascii_lowercase();
     let idx = lower.find("btih:")?;
@@ -185,16 +204,182 @@ pub fn parse_filename(name: &str) -> ParsedName {
     static GROUP: OnceLock<Regex> = OnceLock::new();
     let res_re = RES.get_or_init(|| Regex::new(r"(?i)\b(2160|1080|720|480)p?\b").unwrap());
     let ep_re = EP.get_or_init(|| {
-        Regex::new(r"(?i)(?:\s|\[|\(|\.)(?:e|ep|episode)?[\s._-]*(\d{1,4})(?:v\d+)?(?:\s|\]|\)|\.|$)")
+        Regex::new(r"(?i)(?:\bs\d{1,2}e|e(?:p(?:isode)?)?[\s._-]*)(\d{1,4})(?:v\d+)?")
             .unwrap()
     });
     let group_re = GROUP.get_or_init(|| Regex::new(r"^\[([^\]]+)\]").unwrap());
     let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+    let episode = ep_re.captures(stem).map(|c| {
+        let n = c[1].trim_start_matches('0');
+        if n.is_empty() {
+            "0".into()
+        } else {
+            n.to_string()
+        }
+    });
     ParsedName {
         resolution: res_re.captures(stem).map(|c| c[1].to_string()),
-        episode: ep_re.captures(stem).map(|c| c[1].to_string()),
+        episode,
         group: group_re.captures(stem).map(|c| c[1].to_string()),
     }
+}
+
+fn title_episode_markers(title: &str) -> Vec<(i32, i32)> {
+    static SE: OnceLock<Regex> = OnceLock::new();
+    static CJK: OnceLock<Regex> = OnceLock::new();
+    static EP: OnceLock<Regex> = OnceLock::new();
+    static DASH: OnceLock<Regex> = OnceLock::new();
+    static SPACE: OnceLock<Regex> = OnceLock::new();
+    let se = SE.get_or_init(|| {
+        Regex::new(r"(?i)s\d{1,2}e(\d{1,4})(?:\s*[-~]\s*(?:s\d{1,2})?e?(\d{1,4}))?")
+            .unwrap()
+    });
+    let mut out = Vec::new();
+    for cap in se.captures_iter(title) {
+        push_marker(&mut out, &cap[1], cap.get(2).map(|m| m.as_str()));
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    let cjk = CJK.get_or_init(|| {
+        Regex::new(r"(?:第|제)?\s*(\d{1,4})(?:\s*[-~～]\s*(?:第|제)?\s*(\d{1,4}))?\s*[话話集回弾화]")
+            .unwrap()
+    });
+    for cap in cjk.captures_iter(title) {
+        push_marker(&mut out, &cap[1], cap.get(2).map(|m| m.as_str()));
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    let ep = EP.get_or_init(|| {
+        Regex::new(r"(?i)(?:^|[\s._\[\(\-])(?:e|ep|episode)[\s._\-]*(\d{1,4})").unwrap()
+    });
+    for cap in ep.captures_iter(title) {
+        push_marker(&mut out, &cap[1], None);
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    let dash = DASH.get_or_init(|| {
+        Regex::new(r"(?i)[\s._][-~]\s+(\d{1,4})(?:v\d+)?(?:\s*[-~]\s+(\d{1,4})(?:v\d+)?)?")
+            .unwrap()
+    });
+    for cap in dash.captures_iter(title) {
+        push_marker(&mut out, &cap[1], cap.get(2).map(|m| m.as_str()));
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    let space = SPACE.get_or_init(|| {
+        Regex::new(r"(?i)[\s._](\d{1,4})(?:v\d+)?\s*[\[\(【]").unwrap()
+    });
+    for cap in space.captures_iter(title) {
+        push_marker(&mut out, &cap[1], None);
+    }
+    out
+}
+
+fn push_marker(out: &mut Vec<(i32, i32)>, lo_raw: &str, hi_raw: Option<&str>) {
+    let lo: i32 = lo_raw.parse().unwrap_or(0);
+    let hi: i32 = hi_raw.and_then(|s| s.parse().ok()).unwrap_or(lo);
+    if lo > 0 && !(1900..=2100).contains(&lo) && !matches!(lo, 480 | 720 | 1080 | 2160) {
+        out.push((lo.min(hi), lo.max(hi)));
+    }
+}
+
+pub fn has_conflicting_episode(title: &str, wanted: &[i32]) -> bool {
+    if wanted.is_empty() {
+        return false;
+    }
+    let markers = title_episode_markers(title);
+    if markers.is_empty() {
+        return false;
+    }
+    for (lo, hi) in markers {
+        if wanted.iter().any(|w| *w >= lo && *w <= hi) {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn wanted_season(titles: &[String]) -> Option<i32> {
+    titles.iter().filter_map(|t| season_hint_from_title(t)).max()
+}
+
+fn season_hint_from_title(title: &str) -> Option<i32> {
+    static ORD: OnceLock<Regex> = OnceLock::new();
+    static SEASON: OnceLock<Regex> = OnceLock::new();
+    static KI: OnceLock<Regex> = OnceLock::new();
+    let ord = ORD.get_or_init(|| {
+        Regex::new(r"(?i)\b(\d{1,2})(?:st|nd|rd|th)\s*season\b").unwrap()
+    });
+    if let Some(n) = capture_season(ord, title) {
+        return Some(n);
+    }
+    let season = SEASON.get_or_init(|| Regex::new(r"(?i)\bseason\s*(\d{1,2})\b").unwrap());
+    if let Some(n) = capture_season(season, title) {
+        return Some(n);
+    }
+    let ki = KI.get_or_init(|| Regex::new(r"(?:第)?(\d{1,2})\s*期").unwrap());
+    if let Some(n) = capture_season(ki, title) {
+        return Some(n);
+    }
+    roman_suffix(title)
+}
+
+fn capture_season(re: &Regex, title: &str) -> Option<i32> {
+    let n: i32 = re.captures(title)?.get(1)?.as_str().parse().ok()?;
+    (n > 0 && n < 40).then_some(n)
+}
+
+fn roman_suffix(title: &str) -> Option<i32> {
+    let trimmed = title
+        .trim()
+        .trim_end_matches(|c: char| matches!(c, ')' | ']' | ':' | '-' | '.'));
+    let mut parts = trimmed.split_whitespace().rev();
+    let last = parts.next()?;
+    let has_name = parts.next().is_some();
+    match last.to_ascii_uppercase().as_str() {
+        "II" => Some(2),
+        "III" => Some(3),
+        "IV" => Some(4),
+        "V" => Some(5),
+        "VI" => Some(6),
+        "VII" => Some(7),
+        "VIII" => Some(8),
+        "IX" => Some(9),
+        "X" => Some(10),
+        digits if has_name && digits.chars().all(|c| c.is_ascii_digit()) => {
+            let n: i32 = digits.parse().ok()?;
+            (2..=20).contains(&n).then_some(n)
+        }
+        _ => None,
+    }
+}
+
+fn release_seasons(title: &str) -> Vec<i32> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"(?i)\bs(\d{1,2})e\d").unwrap());
+    let mut out = Vec::new();
+    for cap in re.captures_iter(title) {
+        let n: i32 = cap[1].parse().unwrap_or(0);
+        if n > 0 && n < 40 && !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out
+}
+
+pub fn has_conflicting_season(title: &str, wanted: i32) -> bool {
+    if wanted <= 0 {
+        return false;
+    }
+    let found = release_seasons(title);
+    if found.is_empty() {
+        return false;
+    }
+    !found.contains(&wanted)
 }
 
 pub fn build_magnet(hash: &str, name: &str) -> String {
@@ -307,16 +492,14 @@ pub fn decode(s: &str) -> String {
 }
 
 pub fn trim_title_for_query(title: &str) -> String {
-    let raw = title.trim();
-    if raw.is_empty() {
-        return String::new();
-    }
-    let base = raw
-        .split_once(':')
-        .filter(|(h, _)| !h.is_empty())
-        .map(|(h, _)| h)
-        .unwrap_or(raw);
-    let cleaned: String = base
+    query_bases(title).into_iter().next().unwrap_or_default()
+}
+
+fn significant_words(s: &str, max: usize) -> String {
+    const STOP: &[&str] = &[
+        "the", "a", "an", "of", "and", "or", "to", "in", "on", "for", "part", "season", "movie",
+    ];
+    let cleaned: String = s
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || c.is_whitespace() {
@@ -326,29 +509,47 @@ pub fn trim_title_for_query(title: &str) -> String {
             }
         })
         .collect();
-    let words: Vec<&str> = cleaned
+    cleaned
         .split_whitespace()
-        .filter(|w| w.len() >= 3)
-        .take(4)
-        .collect();
-    if !words.is_empty() {
-        return words.join(" ");
-    }
-    let fallback: String = raw
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c.is_whitespace() {
-                c
-            } else {
-                ' '
-            }
-        })
-        .collect();
-    fallback
-        .split_whitespace()
-        .take(4)
+        .filter(|w| w.len() >= 3 && !STOP.iter().any(|s| s.eq_ignore_ascii_case(w)))
+        .take(max)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn query_bases(title: &str) -> Vec<String> {
+    let raw = title.trim();
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut push = |value: String| {
+        if value.is_empty() {
+            return;
+        }
+        if !out.iter().any(|have: &String| have.eq_ignore_ascii_case(&value)) {
+            out.push(value);
+        }
+    };
+    if let Some((head, tail)) = raw
+        .split_once(':')
+        .filter(|(head, tail)| !head.trim().is_empty() && !tail.trim().is_empty())
+    {
+        let suffix = significant_words(tail, 4);
+        let prefix = significant_words(head, 4);
+        let suffix_strong = suffix.split_whitespace().any(|w| w.len() >= 6)
+            || suffix.split_whitespace().count() >= 2;
+        if suffix_strong {
+            push(suffix.clone());
+        }
+        push(prefix);
+        if !suffix_strong {
+            push(suffix);
+        }
+    } else {
+        push(significant_words(raw, 4));
+    }
+    out
 }
 
 pub fn query_variants_for(query: &Query) -> Vec<String> {
@@ -368,16 +569,20 @@ fn query_variants_eps(titles: &[String], episodes: &[i32]) -> Vec<String> {
     let mut bases = Vec::new();
     let mut seen_base = HashSet::new();
     for title in titles {
-        let q = trim_title_for_query(title);
-        if q.is_empty() {
-            continue;
+        for q in query_bases(title) {
+            if q.is_empty() {
+                continue;
+            }
+            let key = q.to_ascii_lowercase();
+            if !seen_base.insert(key) {
+                continue;
+            }
+            bases.push(q);
+            if bases.len() >= 3 {
+                break;
+            }
         }
-        let key = q.to_ascii_lowercase();
-        if !seen_base.insert(key) {
-            continue;
-        }
-        bases.push(q);
-        if bases.len() >= 2 {
+        if bases.len() >= 3 {
             break;
         }
     }
@@ -396,10 +601,12 @@ fn query_variants_eps(titles: &[String], episodes: &[i32]) -> Vec<String> {
             }
         }
     }
-    for base in bases {
-        push(&mut out, base);
-        if out.len() >= 4 {
-            break;
+    if episodes.is_empty() {
+        for base in bases {
+            push(&mut out, base);
+            if out.len() >= 4 {
+                break;
+            }
         }
     }
     out
@@ -577,6 +784,64 @@ macro_rules! torrent_plugin {
             extism_pdk::Json(input): extism_pdk::Json<$crate::SearchInput>,
         ) -> extism_pdk::FnResult<extism_pdk::Json<Vec<$crate::Hit>>> {
             match __hayase_run(&input) {
+                Ok(rows) => Ok(extism_pdk::Json(rows)),
+                Err(err) => Err(extism_pdk::WithReturnCode::new(
+                    extism_pdk::Error::msg(err),
+                    1,
+                )),
+            }
+        }
+
+        #[extism_pdk::plugin_fn]
+        pub fn test(_: ()) -> extism_pdk::FnResult<extism_pdk::Json<bool>> {
+            Ok(extism_pdk::Json($test()))
+        }
+    };
+    ($single:expr, $batch:expr, $movie:expr, $test:expr) => {
+        #[extism_pdk::plugin_fn]
+        pub fn single(
+            extism_pdk::Json(input): extism_pdk::Json<$crate::SearchInput>,
+        ) -> extism_pdk::FnResult<extism_pdk::Json<Vec<$crate::Hit>>> {
+            match $single(&input) {
+                Ok(rows) => Ok(extism_pdk::Json(rows)),
+                Err(err) => Err(extism_pdk::WithReturnCode::new(
+                    extism_pdk::Error::msg(err),
+                    1,
+                )),
+            }
+        }
+
+        #[extism_pdk::plugin_fn]
+        pub fn batch(
+            extism_pdk::Json(input): extism_pdk::Json<$crate::SearchInput>,
+        ) -> extism_pdk::FnResult<extism_pdk::Json<Vec<$crate::Hit>>> {
+            match $batch(&input) {
+                Ok(rows) => Ok(extism_pdk::Json(rows)),
+                Err(err) => Err(extism_pdk::WithReturnCode::new(
+                    extism_pdk::Error::msg(err),
+                    1,
+                )),
+            }
+        }
+
+        #[extism_pdk::plugin_fn]
+        pub fn movie(
+            extism_pdk::Json(input): extism_pdk::Json<$crate::SearchInput>,
+        ) -> extism_pdk::FnResult<extism_pdk::Json<Vec<$crate::Hit>>> {
+            match $movie(&input) {
+                Ok(rows) => Ok(extism_pdk::Json(rows)),
+                Err(err) => Err(extism_pdk::WithReturnCode::new(
+                    extism_pdk::Error::msg(err),
+                    1,
+                )),
+            }
+        }
+
+        #[extism_pdk::plugin_fn]
+        pub fn search(
+            extism_pdk::Json(input): extism_pdk::Json<$crate::SearchInput>,
+        ) -> extism_pdk::FnResult<extism_pdk::Json<Vec<$crate::Hit>>> {
+            match $single(&input) {
                 Ok(rows) => Ok(extism_pdk::Json(rows)),
                 Err(err) => Err(extism_pdk::WithReturnCode::new(
                     extism_pdk::Error::msg(err),

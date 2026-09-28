@@ -1,6 +1,6 @@
 use crate::{
     decode, encode_query, http_get, http_ok, json_get, magnet_hash, option_bool, parse_size,
-    query_variants_for, search_nyaa_queries, torrent_from_parts, Hit, Query, SearchInput,
+    search_nyaa_queries, titles0_query, torrent_from_parts, Hit, Query, SearchInput,
 };
 use regex::Regex;
 use serde::Deserialize;
@@ -8,35 +8,29 @@ use serde_json::Value;
 use std::sync::OnceLock;
 
 pub fn nyaa_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
-    Ok(nyaa_like(
-        &input.query,
-        "https://nyaa.si",
-        "1_2",
+    vercel_title_search(
+        input,
+        "https://torrent-search-api-livid.vercel.app/api/nyaasi/",
         "nyaa",
-        "medium",
-        None,
-        None,
-    ))
+        true,
+    )
 }
 
 pub fn nyaa_test() -> bool {
-    http_ok("https://nyaa.si")
+    http_ok("https://torrent-search-api-livid.vercel.app/api/nyaasi/one%20piece")
 }
 
 pub fn sukebei_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
-    Ok(nyaa_like(
-        &input.query,
-        "https://sukebei.nyaa.si",
-        "1_1",
+    vercel_title_search(
+        input,
+        "https://torrent-search-api-livid.vercel.app/api/sukebei/",
         "sukebei",
-        "medium",
-        None,
-        None,
-    ))
+        false,
+    )
 }
 
 pub fn sukebei_test() -> bool {
-    http_ok("https://sukebei.nyaa.si")
+    http_ok("https://torrent-search-api-livid.vercel.app/api/sukebei/test")
 }
 
 pub fn yameii_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
@@ -84,18 +78,19 @@ fn nyaa_like(
     user: Option<&str>,
     prefix: Option<&str>,
 ) -> Vec<Hit> {
-    let queries = query_variants_for(query)
-        .into_iter()
-        .map(|q| match prefix {
-            Some(p) => format!("{p} {q}"),
-            None => q,
-        })
-        .collect();
+    let title = query.titles.first().cloned().unwrap_or_default();
+    if title.is_empty() {
+        return Vec::new();
+    }
+    let mut q = titles0_query(&title, query.episode);
+    if let Some(p) = prefix {
+        q = format!("{p} {q}");
+    }
     let user_q = user
         .map(|u| format!("u={u}&"))
         .unwrap_or_default();
     search_nyaa_queries(
-        queries,
+        vec![q],
         |q| {
             format!(
                 "{host}/?{user_q}page=rss&c={category}&f=0&s=id&o=desc&q={}",
@@ -107,73 +102,91 @@ fn nyaa_like(
     )
 }
 
+fn vercel_title_search(
+    input: &SearchInput,
+    base: &str,
+    source: &str,
+    parse_size_field: bool,
+) -> Result<Vec<Hit>, String> {
+    let title = input.query.titles.first().cloned().unwrap_or_default();
+    if title.is_empty() {
+        return Ok(vec![]);
+    }
+    let q = titles0_query(&title, input.query.episode);
+    let url = format!("{base}{}", encode_query(&q));
+    let rows: Vec<PbRow> =
+        serde_json::from_str(&http_get(&url).unwrap_or_default()).unwrap_or_default();
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.into_result_src(source, parse_size_field))
+        .collect())
+}
+
 pub fn seadex_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
     let query = &input.query;
     if query.anilist_id <= 0 {
-        return Ok(vec![]);
+        return Err("No anilistId provided".into());
+    }
+    if query.titles.is_empty() {
+        return Err("No titles provided".into());
     }
     let url = format!(
-        "https://releases.moe/api/collections/entries/records?expand=trs&perPage=10&filter={}",
-        encode_query(&format!("(alID={})", query.anilist_id))
+        "https://releases.moe/api/collections/entries/records?page=1&perPage=1&filter=alID%3D%22{}%22&skipTotal=1&expand=trs",
+        query.anilist_id
     );
     let data: Records = serde_json::from_str(&http_get(&url)?).unwrap_or_default();
-    let show = query
-        .titles
+    let Some(trs) = data
+        .items
         .first()
-        .cloned()
-        .unwrap_or_else(|| "release".into());
+        .and_then(|item| item.expand.as_ref())
+        .and_then(|e| e.trs.as_ref())
+    else {
+        return Ok(vec![]);
+    };
+    let show = query.titles.first().cloned().unwrap_or_default();
+    let episode_count = query.episode_count.unwrap_or(0);
     let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for item in data.items {
-        let Some(trs) = item.expand.and_then(|e| e.trs) else {
+    for tr in trs {
+        let hash = tr.info_hash.clone().unwrap_or_default();
+        if hash == " " {
             continue;
-        };
-        for tr in trs {
-            let hash = tr.info_hash.unwrap_or_default().trim().to_ascii_lowercase();
-            if hash.len() < 32 || !seen.insert(hash.clone()) {
-                continue;
-            }
-            let files = tr.files.unwrap_or_default();
-            let size: u64 = files.iter().filter_map(|f| f.length).sum();
-            let first_name = files.iter().find_map(|f| f.name.clone()).unwrap_or_default();
-            let group = tr.release_group.as_deref().unwrap_or("");
-            let dual = if tr.dual_audio.unwrap_or(false) {
-                " Dual Audio"
-            } else {
-                ""
-            };
-            let title = if files.len() == 1 && !first_name.is_empty() {
-                first_name
-            } else if !group.is_empty() {
-                format!("[{group}] {show}{dual}")
-            } else {
-                format!("{show}{dual}")
-            };
-            let accuracy = if tr.is_best.unwrap_or(false) {
-                "high"
-            } else {
-                "medium"
-            };
-            let mut row = torrent_from_parts(
-                title,
-                hash,
-                "seadex",
-                accuracy,
-                0,
-                0,
-                0,
-                size,
-                tr.created.unwrap_or_default(),
-            );
-            row.kind = if tr.is_best.unwrap_or(false) {
-                Some("best".into())
-            } else if files.len() > 1 {
-                Some("batch".into())
-            } else {
-                None
-            };
-            out.push(row);
         }
+        let files = tr.files.clone().unwrap_or_default();
+        if episode_count != 0 && episode_count != 1 && files.len() == 1 {
+            continue;
+        }
+        let size: u64 = files.iter().filter_map(|f| f.length).sum();
+        let group = tr.release_group.as_deref().unwrap_or("");
+        let dual = if tr.dual_audio.unwrap_or(false) {
+            "Dual Audio"
+        } else {
+            ""
+        };
+        let title = if files.len() == 1 {
+            files
+                .first()
+                .and_then(|f| f.name.clone())
+                .unwrap_or_else(|| show.clone())
+        } else {
+            format!("[{group}] {show} {dual}")
+        };
+        let mut row = torrent_from_parts(
+            title,
+            hash.trim().to_ascii_lowercase(),
+            "seadex",
+            "high",
+            0,
+            0,
+            0,
+            size,
+            tr.created.clone().unwrap_or_default(),
+        );
+        row.kind = if tr.is_best.unwrap_or(false) {
+            Some("best".into())
+        } else {
+            Some("alt".into())
+        };
+        out.push(row);
     }
     Ok(out)
 }
@@ -200,7 +213,7 @@ struct Expand {
     trs: Option<Vec<SdTorrent>>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase", default)]
 struct SdTorrent {
     info_hash: Option<String>,
@@ -211,7 +224,7 @@ struct SdTorrent {
     files: Option<Vec<SdFile>>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 struct SdFile {
     name: Option<String>,
@@ -221,35 +234,62 @@ struct SdFile {
 pub fn animetosho_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
     const BASE: &str = "https://feed.animetosho.org/json";
     let query = &input.query;
+    let Some(eid) = query.anidb_eid.filter(|id| *id > 0) else {
+        return Err("No anidbEid provided".into());
+    };
     let use_torrent = option_bool(input, "useTorrent", false);
-    let mut rows: Vec<ToshoRow> = Vec::new();
-    let mut accuracy = "medium";
-    if let Some(eid) = query.anidb_eid.filter(|id| *id > 0) {
-        rows = fetch_tosho(&format!("{BASE}?eid={eid}"));
-        if !rows.is_empty() {
-            accuracy = "high";
-        }
-    }
-    if rows.is_empty() {
-        if let Some(aid) = query.anidb_aid.filter(|id| *id > 0) {
-            rows = fetch_tosho(&format!("{BASE}?aid={aid}"));
-            if !rows.is_empty() {
-                accuracy = "high";
-            }
-        }
-    }
-    if rows.is_empty() {
-        for q in query_variants_for(query) {
-            rows = fetch_tosho(&format!("{BASE}?q={}", encode_query(&q)));
-            if !rows.is_empty() {
-                break;
-            }
-        }
-    }
-    Ok(rows
+    let q = tosho_query_suffix(&query.resolution, &query.exclusions);
+    let rows = fetch_tosho(&format!("{BASE}?eid={eid}{q}"));
+    Ok(map_tosho(rows, false, use_torrent))
+}
+
+pub fn animetosho_batch(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    const BASE: &str = "https://feed.animetosho.org/json";
+    let query = &input.query;
+    let Some(aid) = query.anidb_aid.filter(|id| *id > 0) else {
+        return Err("No anidbAid provided".into());
+    };
+    let Some(episode_count) = query.episode_count else {
+        return Err("No episodeCount provided".into());
+    };
+    let use_torrent = option_bool(input, "useTorrent", false);
+    let q = tosho_query_suffix(&query.resolution, &query.exclusions);
+    let rows = fetch_tosho(&format!("{BASE}?order=size-d&aid={aid}{q}"))
         .into_iter()
-        .filter_map(|row| row.into_result(accuracy, use_torrent, "animetosho"))
-        .collect())
+        .filter(|row| row.num_files.unwrap_or(0) >= episode_count)
+        .collect();
+    Ok(map_tosho(rows, true, use_torrent))
+}
+
+pub fn animetosho_movie(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    const BASE: &str = "https://feed.animetosho.org/json";
+    let query = &input.query;
+    let Some(aid) = query.anidb_aid.filter(|id| *id > 0) else {
+        return Err("No anidbAid provided".into());
+    };
+    let use_torrent = option_bool(input, "useTorrent", false);
+    let q = tosho_query_suffix(&query.resolution, &query.exclusions);
+    let rows = fetch_tosho(&format!("{BASE}?aid={aid}{q}"));
+    Ok(map_tosho(rows, false, use_torrent))
+}
+
+fn tosho_query_suffix(resolution: &str, exclusions: &[String]) -> String {
+    const QUALITIES: [&str; 4] = ["1080", "720", "540", "480"];
+    let joined = exclusions.join("\"|\"");
+    let mut base = format!("&qx=1&q=(!(\"{joined}\"))");
+    let res = resolution.trim().trim_end_matches('p');
+    if res.is_empty() || res == "0" {
+        return base;
+    }
+    let excl: Vec<&str> = QUALITIES.iter().copied().filter(|q| *q != res).collect();
+    base.push_str(&format!("!(*{}*)", excl.join("*|*")));
+    base
+}
+
+fn map_tosho(rows: Vec<ToshoRow>, batch: bool, use_torrent: bool) -> Vec<Hit> {
+    rows.into_iter()
+        .filter_map(|row| row.into_result(batch, use_torrent, "animetosho"))
+        .collect()
 }
 
 pub fn animetosho_test() -> bool {
@@ -261,6 +301,7 @@ fn fetch_tosho(url: &str) -> Vec<ToshoRow> {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(default)]
 struct ToshoRow {
     title: Option<String>,
     torrent_name: Option<String>,
@@ -274,10 +315,12 @@ struct ToshoRow {
     total_size: Option<u64>,
     size_string: Option<String>,
     timestamp: Option<i64>,
+    anidb_fid: Option<i64>,
+    num_files: Option<i32>,
 }
 
 impl ToshoRow {
-    fn into_result(self, accuracy: &str, use_torrent: bool, source: &str) -> Option<Hit> {
+    fn into_result(self, batch: bool, use_torrent: bool, source: &str) -> Option<Hit> {
         let title = self.title.or(self.torrent_name).unwrap_or_default();
         let torrent_url = self.torrent_url.filter(|u| crate::is_http_torrent_url(u));
         let magnet = self.magnet_uri.unwrap_or_default();
@@ -290,21 +333,31 @@ impl ToshoRow {
         if title.is_empty() || hash.is_empty() {
             return None;
         }
+        let accuracy = if self.anidb_fid.is_some() {
+            "high"
+        } else {
+            "medium"
+        };
         let mut row = torrent_from_parts(
             title,
             hash,
             source,
             accuracy,
-            self.seeders.unwrap_or(0),
-            self.leechers.unwrap_or(0),
-            self.num_complete
-                .or(self.torrent_downloaded_count)
-                .unwrap_or(0),
+            clamp_peers(self.seeders),
+            clamp_peers(self.leechers),
+            self.torrent_downloaded_count.unwrap_or(0),
             self.total_size
                 .or_else(|| self.size_string.as_deref().map(parse_size))
                 .unwrap_or(0),
-            self.timestamp.map(|t| t.to_string()).unwrap_or_default(),
+            self.timestamp
+                .map(|t| (t * 1000).to_string())
+                .unwrap_or_default(),
         );
+        row.kind = if batch {
+            Some("batch".into())
+        } else {
+            None
+        };
         if use_torrent {
             if let Some(url) = torrent_url {
                 row.link = url;
@@ -440,27 +493,26 @@ struct NewRow {
 
 pub fn subsplease_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
     let query = &input.query;
-    let q = crate::trim_title_for_query(&query.titles.first().cloned().unwrap_or_default());
-    if q.is_empty() {
+    let title = query.titles.first().cloned().unwrap_or_default();
+    if title.is_empty() {
         return Ok(vec![]);
     }
+    let mut q = title;
+    if query.episode != 0 {
+        q.push_str(&format!(" {}", query.episode));
+    }
     let url = format!(
-        "https://subsplease.org/api/?f=search&tz=UTC&s={}",
+        "https://subsplease.org/api/?f=search&tz=America/New_York&s={}",
         encode_query(&q)
     );
     let data: Value = serde_json::from_str(&http_get(&url)?).unwrap_or(Value::Null);
     let Some(obj) = data.as_object() else {
         return Ok(vec![]);
     };
-    let mut exact = Vec::new();
-    let mut rest = Vec::new();
-    for (key, entry) in obj {
+    let mut results = Vec::new();
+    for (_key, entry) in obj {
         let episode = entry.get("episode").and_then(|v| v.as_str()).unwrap_or("");
-        let matches_ep = episode_matches(episode, query);
-        let show = entry
-            .get("show")
-            .and_then(|v| v.as_str())
-            .unwrap_or(key.as_str());
+        let show = entry.get("show").and_then(|v| v.as_str()).unwrap_or("");
         let date = entry
             .get("release_date")
             .and_then(|v| v.as_str())
@@ -475,59 +527,38 @@ pub fn subsplease_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
                 continue;
             };
             let res = dl.get("res").and_then(|v| v.as_str()).unwrap_or("");
-            let title = if res.is_empty() {
-                format!("[SubsPlease] {show} - {episode}")
-            } else {
-                format!("[SubsPlease] {show} - {episode} ({res}p)")
-            };
-            let size = magnet
-                .split(['?', '&'])
-                .find_map(|p| p.strip_prefix("xl=").and_then(|n| n.parse().ok()))
-                .unwrap_or(0);
+            let title = format!("{show} - {episode} ({res}p)");
             let mut row =
-                torrent_from_parts(title, hash, "subsplease", "high", 0, 0, 0, size, date.clone());
+                torrent_from_parts(title, hash, "subsplease", "high", 0, 0, 0, 0, date.clone());
             if magnet.starts_with("magnet:") {
                 row.link = magnet.to_string();
             }
-            if matches_ep {
-                exact.push(row);
-            } else {
-                rest.push(row);
-            }
+            row.kind = Some("alt".into());
+            results.push(row);
         }
     }
-    Ok(if exact.is_empty() { rest } else { exact })
+    Ok(results)
 }
 
 pub fn subsplease_test() -> bool {
-    http_ok("https://subsplease.org/api/")
-}
-
-fn episode_matches(episode: &str, query: &Query) -> bool {
-    if query.episode <= 0 {
-        return true;
-    }
-    if let Ok(n) = episode.trim().parse::<i32>() {
-        return n == query.episode || query.episode_candidates.contains(&n);
-    }
-    episode.is_empty() || episode.contains('-') || episode.eq_ignore_ascii_case("batch")
+    http_ok("https://subsplease.org/api/?f=search&tz=America/New_York&s=One%20Piece")
 }
 
 pub fn tokyotosho_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
-    let mut last = Vec::new();
-    for q in query_variants_for(&input.query) {
-        let url = format!(
-            "https://www.tokyotosho.info/rss.php?terms={}",
-            encode_query(&q)
-        );
-        if let Ok(body) = http_get(&url) {
-            last = parse_tokyotosho_rss(&body);
-            if !last.is_empty() {
-                break;
-            }
-        }
+    let title = input.query.titles.first().cloned().unwrap_or_default();
+    if title.is_empty() {
+        return Ok(vec![]);
     }
-    Ok(last)
+    let mut q = title;
+    if input.query.episode != 0 {
+        q.push_str(&format!(" {}", input.query.episode));
+    }
+    let url = format!(
+        "https://www.tokyotosho.info/rss.php?terms={}",
+        encode_query(&q)
+    );
+    let body = http_get(&url)?;
+    Ok(parse_tokyotosho_rss(&body))
 }
 
 pub fn tokyotosho_test() -> bool {
@@ -600,28 +631,12 @@ fn parse_tokyotosho_rss(xml: &str) -> Vec<Hit> {
 }
 
 pub fn piratebay_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
-    const BASE: &str = "https://torrent-search-api-livid.vercel.app/api/piratebay/";
-    let title = input.query.titles.first().cloned().unwrap_or_default();
-    if title.is_empty() {
-        return Ok(vec![]);
-    }
-    let mut q = title
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c.is_whitespace() {
-                c
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>();
-    q = q.split_whitespace().collect::<Vec<_>>().join(" ");
-    if input.query.episode > 0 {
-        q.push_str(&format!(" {:02}", input.query.episode));
-    }
-    let url = format!("{BASE}{}", encode_query(&q));
-    let rows: Vec<PbRow> = serde_json::from_str(&http_get(&url).unwrap_or_default()).unwrap_or_default();
-    Ok(rows.into_iter().filter_map(PbRow::into_result).collect())
+    vercel_title_search(
+        input,
+        "https://torrent-search-api-livid.vercel.app/api/piratebay/",
+        "piratebay",
+        true,
+    )
 }
 
 pub fn piratebay_test() -> bool {
@@ -664,22 +679,27 @@ impl ValueOrNum {
 }
 
 impl PbRow {
-    fn into_result(self) -> Option<Hit> {
+    fn into_result_src(self, source: &str, parse_size_field: bool) -> Option<Hit> {
         let title = self.name.unwrap_or_default();
         let magnet = self.magnet.unwrap_or_default();
         let hash = magnet_hash(&magnet).unwrap_or_default();
         if title.is_empty() || hash.is_empty() {
             return None;
         }
+        let size = if parse_size_field {
+            self.size.as_deref().map(parse_size).unwrap_or(0)
+        } else {
+            0
+        };
         let mut row = torrent_from_parts(
             title,
             hash,
-            "piratebay",
+            source,
             "medium",
             self.seeders.map(|v| v.as_i32()).unwrap_or(0),
             self.leechers.map(|v| v.as_i32()).unwrap_or(0),
             self.downloads.map(|v| v.as_i32()).unwrap_or(0),
-            self.size.as_deref().map(parse_size).unwrap_or(0),
+            size,
             self.date.unwrap_or_default(),
         );
         row.kind = Some("alt".into());
@@ -769,6 +789,18 @@ pub fn nekobt_test() -> bool {
     http_ok("https://nekobt.to/api/v1/announcements")
 }
 
+pub fn empty_search(_: &SearchInput) -> Result<Vec<Hit>, String> {
+    Ok(vec![])
+}
+
+pub fn nekobt_movie(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    nekobt_search(input)
+}
+
+pub fn animetosho_new_movie(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    animetosho_new_search(input)
+}
+
 fn nekobt_fetch(path_and_query: &str) -> Result<Value, String> {
     let json = json_get(&format!("https://nekobt.to/api/v1/{path_and_query}"))?;
     if json.get("error").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -849,6 +881,18 @@ fn json_num(entry: &Value, key: &str) -> i32 {
 }
 
 pub fn anisearch_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    anisearch_fetch(input, false, false)
+}
+
+pub fn anisearch_batch(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    anisearch_fetch(input, true, false)
+}
+
+pub fn anisearch_movie(input: &SearchInput) -> Result<Vec<Hit>, String> {
+    anisearch_fetch(input, false, true)
+}
+
+fn anisearch_fetch(input: &SearchInput, batch: bool, movie: bool) -> Result<Vec<Hit>, String> {
     const BASE: &str = "https://api.anisearch.org/torrents?";
     const QUALITIES: [&str; 4] = ["1080", "720", "540", "480"];
     let query = &input.query;
@@ -885,17 +929,19 @@ pub fn anisearch_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
             .collect()
     };
     let mut out = Vec::new();
-    if let Some(eid) = query.anidb_eid.filter(|id| *id > 0) {
-        out.extend(fetch(
-            &[
-                ("eid", eid.to_string()),
-                ("includeFiles", "false".into()),
-                ("after", after.clone()),
-            ],
-            false,
-        ));
+    if !batch && !movie {
+        if let Some(eid) = query.anidb_eid.filter(|id| *id > 0) {
+            out.extend(fetch(
+                &[
+                    ("eid", eid.to_string()),
+                    ("includeFiles", "false".into()),
+                    ("after", after.clone()),
+                ],
+                false,
+            ));
+        }
     }
-    if !query.is_single && !query.is_movie {
+    if batch && !query.is_single {
         if let Some(aid) = query.anidb_aid.filter(|id| *id > 0) {
             let file_count = 24.min(2.max(query.episode.max(1)));
             out.extend(fetch(
@@ -909,7 +955,7 @@ pub fn anisearch_search(input: &SearchInput) -> Result<Vec<Hit>, String> {
             ));
         }
     }
-    if query.is_movie {
+    if movie {
         if let Some(aid) = query.anidb_aid.filter(|id| *id > 0) {
             out.extend(fetch(
                 &[
